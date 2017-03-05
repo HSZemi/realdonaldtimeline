@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html>
+<meta charset="utf-8">
+
+<!-- Example based on http://bl.ocks.org/mbostock/3887118 -->
+<!-- Tooltip example from http://www.d3noob.org/2013/01/adding-tooltips-to-d3js-graph.html -->
+
+<style>
+body {
+  font: 11px sans-serif;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+/*.dot {
+  stroke: #000;
+}*/
+
+.tooltip {
+  position: absolute;
+  width: 200px;
+  pointer-events: none;
+  padding: 3px;
+}
+
+span.timestamp{
+	color: gray;
+}
+
+.tick line{
+  stroke: #ccc;
+}
+</style>
+<body>
+
+<h1>@realdonaldtrump tweets</h1>
+<p id="placeholder">Loading agent orange… (6 MB approx.)</p>
+<div id="content">
+
+<p>Every dot is a tweet. Hold your cursor over a dot to display the tweet message and the timestamp. Click on a dot to open the tweet in a new tab. Also try out those settings, they're really great:</p>
+
+<div><button id="schmaler" onclick="narrow()">for Tiny Hands</button><button id="breiter" onclick="widen()">for Big Hands</button></div>
+
+<h2>Tweets vs. Retweets</h2>
+<div id="tweettypes"></div>
+<hr>
+<h2>Clients/Devices</h2>
+<div id="clients"></div>
+</div>
+
+<script src="https://d3js.org/d3.v3.min.js"></script>
+
+<script>
+
+d3.select('#content').style("opacity", 0);
+
+var w  = window,
+	d  = w.document,
+	de = d.documentElement,
+	db = d.body || d.getElementsByTagName('body')[0],
+	vpx  = w.innerWidth || de.clientWidth || db.clientWidth,
+	vpy  = w.innerHeight|| de.clientHeight|| db.clientHeight;
+
+var margin = {top: 20, right: 20, bottom: 30, left: 80},
+	width = vpx - 40 - margin.left - margin.right,
+	height = 600 - margin.top - margin.bottom;
+
+var data = null;
+
+var svg, svg_clients, tooltip, xValue, xScale, xMap, xAxis, yFormat, yValue, yScale, yMap, yAxis, cValue, color, cValue_clients, color_clients;
+
+setupHelperFunctions();
+
+setupAxes();
+
+function setupHelperFunctions(){
+	// setup x 
+	xValue = function(d) { 
+		var tmp = new Date();
+		tmp.setUTCFullYear(d.created_at.getUTCFullYear(), d.created_at.getUTCMonth(), d.created_at.getUTCDate());
+		return tmp.setUTCHours(0,0,0,0);
+	}; // data -> value
+
+	// setup y
+	yFormat = d3.time.format.utc("%H");
+	yValue = function(d) {
+		var tmp = new Date();
+		tmp.setUTCFullYear(1970,0,1);
+		return tmp.setUTCHours(d.created_at.getUTCHours(),d.created_at.getUTCMinutes(),d.created_at.getUTCSeconds(),d.created_at.getUTCMilliseconds());
+	}; // data -> value
+
+	// // setup fill color
+	// var cValue = function(d) { if(d.is_retweet=="True"){return 1;}else{return 0;}},
+	cValue = function(d) { return d.is_retweet};
+	color = d3.scale.category10();
+	
+	// // setup fill color
+	cValue_clients = function(d) { return d.source};
+	color_clients = d3.scale.category20();
+}
+
+function setupAxes(){
+	xScale = d3.time.scale.utc().range([0, width]); // value -> display
+	xMap = function(d) { return xScale(xValue(d));}; // data -> display
+	xAxis = d3.svg.axis().scale(xScale).orient("bottom").innerTickSize(-height);
+	
+	yScale = d3.time.scale.utc().range([height, 0]); // value -> display
+	yMap = function(d) { return yScale(yValue(d));}; // data -> display
+	yAxis = d3.svg.axis().scale(yScale).orient("left").tickFormat(yFormat).ticks(24).innerTickSize(-width);
+}
+
+function setupSvg(){
+	// add the graph canvas to the body of the webpage
+	svg = d3.select("#tweettypes").append("svg").attr("class", 'svgcanvas tweettypes')
+		.attr("width", width + margin.left + margin.right)
+		.attr("height", height + margin.top + margin.bottom)
+		.append("g")
+		.attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+	
+	// add the graph canvas to the body of the webpage
+	svg_clients = d3.select("#clients").append("svg").attr("class", 'svgcanvas clients')
+		.attr("width", width + margin.left + margin.right)
+		.attr("height", height + margin.top + margin.bottom)
+		.append("g")
+		.attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+	// add the tooltip area to the webpage
+	tooltip = d3.select("body").append("div")
+		.attr("class", "tooltip")
+		.style("opacity", 0);
+}
+
+// load data
+d3.csv("realdonaldtrump.csv", function(error, data_in) {
+
+	if(error){
+		d3.select('#placeholder').html("An error occured. Could not load data. Sad!");
+		return;
+	} else {
+		d3.select('#placeholder').html("Calculating hairstyle…");
+	}
+
+	data = data_in;
+	
+	var timestampformat = d3.time.format.utc("%a %b %d %H:%M:%S %Z %Y")
+	
+	// change string (from CSV) into number format
+	data.forEach(function(d) {
+		d.created_at = timestampformat.parse(d.created_at);
+	});
+	
+	setTimeout(drawDiagrams, 100);
+
+});
+
+function drawDiagrams(){
+	
+	setupSvg();
+	
+	// don't want dots overlapping axis, so add in buffer to data domain
+	xScale.domain([d3.min(data, xValue)-1, d3.max(data, xValue)+1]).nice(d3.time.month, 6);
+	yScale.domain([d3.min(data, yValue)-1, d3.max(data, yValue)+1]);
+
+
+	// x-axis
+	svg.append("g")
+		.attr("class", "xaxis axis")
+		.attr("transform", "translate(0," + height + ")")
+		.call(xAxis)
+		.append("text")
+			.attr("class", "label")
+			.attr("id", "xlabel")
+			.attr("x", width)
+			.attr("y", -6)
+			.style("text-anchor", "end")
+			.text("Date (UTC)");
+
+	// y-axis
+	svg.append("g")
+		.attr("class", "yaxis axis")
+		.call(yAxis)
+		.append("text")
+			.attr("class", "label")
+			.attr("transform", "rotate(-90)")
+			.attr("y", 6)
+			.attr("dy", ".71em")
+			.style("text-anchor", "end")
+			.text("Time (UTC)");
+
+	// draw dots
+	svg.selectAll(".dot")
+		.data(data)
+		.enter()
+		.append("circle")
+			.attr("class", "dot")
+			.attr("r", 2)
+			.attr("cx", xMap)
+			.attr("cy", yMap)
+			.style("fill", function(d) { return color(cValue(d));}) 
+			.on("click", function(d) {
+				window.open("https://twitter.com/realDonaldTrump/status/"+d.id_str);
+			})
+			.on("mouseover", function(d) {
+				tooltip.transition()
+				.duration(200)
+				.style("opacity", .9);
+				tooltip.html(d["text"]+"<br><span class='timestamp'>"+d.created_at.toGMTString()+"</span>")
+				.style("left", (d3.event.pageX + 5) + "px")
+				.style("top", (d3.event.pageY - 28) + "px")
+				.style("background-color", "white");
+			})
+			.on("mouseout", function(d) {
+				tooltip.transition()
+				.duration(500)
+				.style("opacity", 0);
+			});
+
+	// draw legend
+	var legend = svg.selectAll(".legend")
+		.data(color.domain())
+		.enter().append("g")
+		.attr("class", "legend")
+		.attr("transform", function(d, i) { return "translate("+(-width+200)+"," + (i * 20 + 350) + ")"; });
+
+	// draw legend colored rectangles
+	legend.append("rect")
+		.attr("x", width - 18)
+		.attr("width", 18)
+		.attr("height", 18)
+		.style("fill", color);
+
+	// draw legend text
+	legend.append("text")
+		.attr("x", width - 24)
+		.attr("y", 9)
+		.attr("dy", ".35em")
+		.style("text-anchor", "end")
+		.text(function(d) {if(d=="True"){return "Retweet";}else{return "Tweet";}});
+	
+	
+	
+	// x-axis
+	svg_clients.append("g")
+		.attr("class", "xaxis axis")
+		.attr("transform", "translate(0," + height + ")")
+		.call(xAxis)
+		.append("text")
+			.attr("class", "label")
+			.attr("id", "xlabel")
+			.attr("x", width)
+			.attr("y", -6)
+			.style("text-anchor", "end")
+			.text("Date (UTC)");
+
+	// y-axis
+	svg_clients.append("g")
+		.attr("class", "yaxis axis")
+		.call(yAxis)
+		.append("text")
+			.attr("class", "label")
+			.attr("transform", "rotate(-90)")
+			.attr("y", 6)
+			.attr("dy", ".71em")
+			.style("text-anchor", "end")
+			.text("Time (UTC)");
+
+	// draw dots
+	svg_clients.selectAll(".dot")
+		.data(data)
+		.enter()
+		.append("circle")
+			.attr("class", "dot")
+			.attr("r", 2)
+			.attr("cx", xMap)
+			.attr("cy", yMap)
+			.style("fill", function(d) { return color_clients(cValue_clients(d));}) 
+			.on("click", function(d) {
+				window.open("https://twitter.com/realDonaldTrump/status/"+d.id_str);
+			})
+			.on("mouseover", function(d) {
+				tooltip.transition()
+				.duration(200)
+				.style("opacity", .9);
+				tooltip.html(d["text"]+"<br><span class='timestamp'>"+d.created_at.toGMTString()+"</span>")
+				.style("left", (d3.event.pageX + 5) + "px")
+				.style("top", (d3.event.pageY - 28) + "px")
+				.style("background-color", "white");
+			})
+			.on("mouseout", function(d) {
+				tooltip.transition()
+				.duration(500)
+				.style("opacity", 0);
+			});
+
+	// draw legend
+	var legend_clients = svg_clients.selectAll(".legend")
+		.data(color_clients.domain())
+		.enter().append("g")
+		.attr("class", "legend")
+		.attr("transform", function(d, i) { return "translate("+(-width+200)+"," + (i * 20 + 150) + ")"; });
+
+	// draw legend colored rectangles
+	legend_clients.append("rect")
+		.attr("x", width - 18)
+		.attr("width", 18)
+		.attr("height", 18)
+		.style("fill", color_clients);
+
+	// draw legend text
+	legend_clients.append("text")
+		.attr("x", width - 24)
+		.attr("y", 9)
+		.attr("dy", ".35em")
+		.style("text-anchor", "end")
+		.text(function(d) {return d});
+
+	d3.select('#placeholder').remove();
+	d3.select('#content').style("opacity", 1);
+}
+
+function updateScale(){
+	d3.selectAll('.svgcanvas').attr("width", width + margin.left + margin.right)
+	.attr("height", height + margin.top + margin.bottom);
+	
+	// setup x 
+	xScale = d3.time.scale().range([0, width]), // value -> display
+	xMap = function(d) { return xScale(xValue(d));}, // data -> display
+	xAxis = d3.svg.axis().scale(xScale).orient("bottom").innerTickSize(-height);
+	
+	yAxis.innerTickSize(-width);
+	
+	xScale.domain([d3.min(data, xValue)-1, d3.max(data, xValue)+1]).nice(d3.time.month, 6);
+	
+	// Make the change
+	var svg = d3.selectAll(".svgcanvas").transition();
+	
+	svg.select('#xlabel').remove();
+	
+	svg.selectAll(".dot")   // change the dots
+		.duration(750)
+		.attr("cx", xMap)
+		.attr("cy", yMap);
+	svg.select(".xaxis") // change the x axis
+		.duration(750)
+		.call(xAxis)
+		.append("text")
+			.attr("class", "label")
+			.attr("id", "xlabel")
+			.attr("x", width)
+			.attr("y", -6)
+			.style("text-anchor", "end")
+			.text("Date");
+	svg.select(".yaxis") // change the x axis
+		.duration(750)
+		.call(yAxis);
+}
+
+function narrow(){
+	width /= 2;
+	
+	updateScale();
+}
+function widen(){
+	width *= 2;
+	
+	updateScale();
+}
+
+</script>
+</body>
+</html>
